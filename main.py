@@ -5,6 +5,8 @@ import hashlib
 import math
 import os
 import re
+import secrets
+from io import BytesIO
 import sqlite3
 import uuid
 from collections import Counter
@@ -88,7 +90,7 @@ def require_api_key(
 ) -> None:
     if not API_KEY:
         raise HTTPException(status_code=503, detail="Set AGENT_API_KEY before using protected endpoints.")
-    if authorization != f"Bearer {API_KEY}":
+    if not secrets.compare_digest(authorization or "", f"Bearer {API_KEY}"):
         raise HTTPException(status_code=401, detail="Missing or invalid bearer token.")
 
 
@@ -282,7 +284,7 @@ async def upload_document(file: UploadFile = File(...)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF.")
 
     try:
-        reader = PdfReader(content)
+        reader = PdfReader(BytesIO(content))
         if reader.is_encrypted:
             raise HTTPException(status_code=400, detail="Password-protected PDFs are not supported.")
         if len(reader.pages) > MAX_PAGES:
