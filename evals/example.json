@@ -1,0 +1,8 @@
+[
+  {
+    "id": "replace-with-your-first-case",
+    "document_id": "replace-after-uploading-your-test-pdf",
+    "question": "Write a question whose answer is clearly stated in your test PDF.",
+    "expected_terms": ["add", "one or more distinctive words from the correct answer"]
+  }
+]
