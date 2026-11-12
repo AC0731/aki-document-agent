@@ -1,47 +1,27 @@
 # Aki Document Agent
 
-A reusable document question-answering API. Upload a text-based PDF, ask questions about it, and receive an answer grounded in retrieved passages with page references. The model can call a restricted calculator tool for arithmetic.
+I built this FastAPI service to ask questions about a PDF and see the passages behind the answer. It uses BM25 search to find text, then sends the matching sections to OpenAI. A calculator tool handles basic arithmetic.
 
-This is an initial implementation. It is not deployed yet and has not been independently tested. It requires an OpenAI API key, which is billed by OpenAI according to the selected model and account.
+This is the first version. It is in GitHub, but I have not deployed or tested it with a set of real documents yet. It needs an OpenAI API key and a separate API key for access. OpenAI usage may have a cost.
 
-## What it does
+## Run it on your computer
 
-- Extracts text from PDFs and stores document chunks in SQLite.
-- Retrieves relevant passages with a local BM25 search.
-- Answers through the OpenAI Chat Completions API and returns source excerpts and page numbers.
-- Provides a calculator tool with an arithmetic-only expression evaluator.
-- Protects document endpoints with a bearer API key.
-- Includes a small evaluation runner for checking expected answer terms and source presence.
-- Exposes OpenAPI docs at `/docs`.
-
-Scanned PDFs need OCR, which is not included. SQLite is suitable for a small single-instance deployment; use a persistent volume at `/data`. For multiple users, add user-level authorization and isolate each user's documents before exposing the service publicly.
-
-## Run locally
-
-Use Python 3.11 or newer.
+You need Python 3.11 or newer.
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-Set the required values in your shell before starting the server:
-
-```powershell
-$env:AGENT_API_KEY = "your-long-random-secret"
+$env:AGENT_API_KEY = "make-a-long-secret"
 $env:OPENAI_API_KEY = "your-openai-api-key"
 uvicorn main:app --reload
 ```
 
-Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). The API key and document content should stay private. Do not commit real keys or sensitive documents.
+Then open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) to use the API. Do not put either key in frontend code or commit it to GitHub.
 
-## Use it from another app
+## Connect it to another app
 
-Set `AGENT_URL` to the deployed base URL and `AGENT_API_KEY` to the same secret configured on the service.
-
-Upload a PDF:
+First upload a PDF. The response gives you a `document_id`.
 
 ```bash
 curl -X POST "$AGENT_URL/v1/documents" \
@@ -49,16 +29,18 @@ curl -X POST "$AGENT_URL/v1/documents" \
   -F "file=@handbook.pdf"
 ```
 
-The response includes a `document_id`. Ask a question:
+Then send a question using that ID:
 
 ```bash
 curl -X POST "$AGENT_URL/v1/ask" \
   -H "Authorization: Bearer $AGENT_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"document_id":"DOCUMENT_ID","question":"What is the leave request process?"}'
+  -d '{"document_id":"DOCUMENT_ID","question":"What does the handbook say about leave?"}'
 ```
 
-A JavaScript integration can use the same HTTP API:
+The answer response includes the source passages and page numbers. The repository also has a [JavaScript example](#javascript-example).
+
+### JavaScript example
 
 ```js
 const response = await fetch(`${AGENT_URL}/v1/ask`, {
@@ -73,50 +55,38 @@ const result = await response.json();
 console.log(result.answer, result.sources);
 ```
 
-Keep the bearer key on your server. Do not put it in frontend code. For browser clients, call this API through your own authenticated backend.
+Keep `AGENT_API_KEY` on a server you control. Do not expose it in a browser app.
 
-## Endpoints
+## Available endpoints
 
-| Method | Path | Purpose |
+| Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/healthz` | Health check |
-| POST | `/v1/documents` | Upload and index a PDF |
-| GET | `/v1/documents` | List indexed PDFs |
-| POST | `/v1/ask` | Ask a question about one PDF |
-| DELETE | `/v1/documents/{document_id}` | Delete a PDF and its chunks |
+| GET | `/healthz` | Check whether the service is running |
+| POST | `/v1/documents` | Upload a PDF |
+| GET | `/v1/documents` | List uploaded PDFs |
+| POST | `/v1/ask` | Ask about a PDF |
+| DELETE | `/v1/documents/{document_id}` | Delete a PDF |
 
-Protected endpoints require `Authorization: Bearer <AGENT_API_KEY>`. Uploads are limited to 20 MB and 200 pages. PDFs must contain selectable text.
+All endpoints except `/healthz` need the bearer API key. PDFs must contain selectable text and be under 20 MB and 200 pages. Scanned PDFs are not supported yet.
 
-## Deploy with Docker
+## Deploy it
 
-Build and run locally:
+The repository includes a Dockerfile. Set `AGENT_API_KEY` and `OPENAI_API_KEY` on your hosting provider and attach persistent storage at `/data`. The service uses SQLite, so a host without a persistent volume will lose uploaded documents when it replaces the container. Use HTTPS.
 
-```bash
-docker build -t aki-document-agent .
-docker run --rm -p 8000:8000 \
-  -e AGENT_API_KEY="$AGENT_API_KEY" \
-  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
-  -v agent-data:/data \
-  aki-document-agent
-```
+## Check answers
 
-On a hosting provider, set `AGENT_API_KEY`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`, `CORS_ORIGINS`, and `DATA_DIR`. Attach persistent storage at `/data`; otherwise documents disappear when the container is replaced. Use HTTPS and a secret manager for production credentials.
-
-## Check answer quality
-
-Copy `evals/example.json`, upload a representative PDF, replace the placeholder ID and question, and add distinctive expected terms. Install the runner dependency with `pip install requests`, then run:
+The [example evaluation file](evals/example.json) is a template. Upload a PDF, add questions and terms you expect to see in the answers, and run:
 
 ```bash
+pip install requests
 python evals/run_eval.py evals/my_cases.json
 ```
 
-The runner checks whether expected terms appear and whether the API returned sources. It is a simple regression signal, not a semantic correctness score. Review every answer and source manually. Keep evaluation PDFs and any sensitive data private.
+This only checks for selected words and whether sources were returned. It does not prove an answer is correct, so read the answers and source passages yourself. I have not reported evaluation results.
 
-## Current limits
+## What still needs work
 
-- One shared API key; there is no user accounts or per-user document isolation.
-- SQLite and one service instance; no distributed vector store.
-- BM25 lexical retrieval can miss passages that use different wording.
-- No OCR for scanned documents.
-- Retrieved text is treated as untrusted reference material, but this is not a substitute for reviewing outputs.
-- No live deployment, usage monitoring, or evaluation results are claimed yet.
+- There is one shared API key and no individual user accounts.
+- Documents are stored in one SQLite database. The service is intended for one small deployment, not multiple servers.
+- BM25 can miss a relevant passage when the document uses different wording.
+- There is no OCR for scanned PDFs.
